@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#14213d">
+<meta name="robots" content="noindex, nofollow">
+<title>ASTdle</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" href="icon-192.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <h1>AST<span>dle</span></h1>
+  <div class="top-right">
+    <span id="streak" class="streak" hidden></span>
+    <button id="statsBtn" class="icon-btn" aria-label="Stats">
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M4 20V10h3v10H4zm6.5 0V4h3v16h-3zM17 20v-7h3v7h-3z"/></svg>
+    </button>
+  </div>
+</header>
+
+<main id="app">
+  <section id="gate" class="screen" hidden>
+    <div class="gate-card">
+      <h2>Welcome to ASTdle</h2>
+      <p>A daily AST multiple-choice question, plus as many extra ones as you want to practise.</p>
+      <p>Scan the QR code from class, or type the access code below.</p>
+      <form id="gateForm" autocomplete="off">
+        <input id="codeInput" type="text" inputmode="text" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Access code" aria-label="Access code">
+        <button type="submit" class="primary">Unlock</button>
+      </form>
+      <p id="gateMsg" class="gate-msg" role="status"></p>
+    </div>
+  </section>
+
+  <section id="loading" class="screen"><div class="spinner" aria-label="Loading"></div></section>
+
+  <section id="play" class="screen" hidden>
+    <nav class="tabs" role="tablist">
+      <button role="tab" id="tabDaily" class="tab active">Daily <span id="dailyNum"></span></button>
+      <button role="tab" id="tabPractice" class="tab">Practice</button>
+    </nav>
+    <div id="qwrap"></div>
+  </section>
+</main>
+
+<dialog id="stats">
+  <div class="dlg">
+    <h2>Your stats</h2>
+    <div id="statsBody"></div>
+    <p class="fine">Stats live in this browser only.</p>
+    <button class="primary" id="statsClose">Close</button>
+  </div>
+</dialog>
+
+<div id="zoom" class="zoom" hidden><img alt=""><button class="zoom-close" aria-label="Close">×</button></div>
+<div id="toast" class="toast" hidden></div>
+
+<script src="marked.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
