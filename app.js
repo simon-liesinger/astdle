@@ -5,7 +5,8 @@
   const LAUNCH = Date.UTC(2026, 10, 8) / 864e5;       // ASTdle #1 = 8 Nov 2026
   const ORDER_SEED = 0xA57D1E;                        // fixes the daily sequence
   const LOOKAHEAD = 30;                               // practice never shows the next 30 dailies
-  const K = { code: 'astdle.code', daily: 'astdle.daily', seen: 'astdle.seen', cur: 'astdle.practiceCurrent', lap: 'astdle.lap' };
+  const K = { code: 'astdle.code', daily: 'astdle.daily', seen: 'astdle.seen', cur: 'astdle.practiceCurrent', lap: 'astdle.lap', timer: 'astdle.timer' };
+  const TIME_LIMIT = 100;                             // seconds per question, as on the real test
 
   const $ = s => document.querySelector(s);
   const store = {
@@ -76,10 +77,44 @@
     if (!pool.length) pool = ORDER;
     return pool[Math.floor(Math.random() * pool.length)];
   }
-  function markSeen(id, correct) {
+  function markSeen(id, correct, secs) {
     const seen = store.get(K.seen, {});
-    seen[id] = { c: correct ? 1 : 0, t: todayIdx(), lap: store.get(K.lap, 0) };
+    seen[id] = { c: correct ? 1 : 0, t: todayIdx(), lap: store.get(K.lap, 0), s: secs };
     store.set(K.seen, seen);
+  }
+
+  // ---------- timer ----------
+  let tick = null, tStart = 0, tId = null;
+  const fmt = s => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  function paintTimer(elapsed, done) {
+    const e = $('#timer'); e.hidden = false;
+    const left = TIME_LIMIT - elapsed;
+    e.textContent = left >= 0 ? fmt(left) : '+' + fmt(-left);
+    e.classList.toggle('over', left < 0);
+    e.classList.toggle('low', left >= 0 && left <= 20);
+    e.classList.toggle('done', !!done);
+    e.setAttribute('aria-label', left >= 0 ? `${left} seconds left` : `${-left} seconds over time`);
+  }
+  function startTimer(id) {
+    clearInterval(tick);
+    const saved = store.get(K.timer, {});               // start times per unanswered question: survives reloads and tab switches
+    const m = saved && typeof saved === 'object' && !saved.id ? saved : {};
+    tId = id; tStart = m[id] || Date.now(); m[id] = tStart;
+    store.set(K.timer, m);
+    const upd = () => paintTimer(Math.min(5999, Math.floor((Date.now() - tStart) / 1000)), false);
+    upd(); tick = setInterval(upd, 250);
+  }
+  function stopTimer() {
+    clearInterval(tick); tick = null;
+    const secs = Math.max(0, Math.floor((Date.now() - tStart) / 1000));
+    const m = store.get(K.timer, {}); if (m && tId) { delete m[tId]; store.set(K.timer, m); }
+    paintTimer(Math.min(5999, secs), true);
+    return secs;
+  }
+  function frozenTimer(secs) {
+    clearInterval(tick); tick = null;
+    if (secs == null) { $('#timer').hidden = true; return; }
+    paintTimer(secs, true);
   }
 
   // ---------- rendering ----------
@@ -96,11 +131,11 @@
     if (mode === 'daily') {
       const n = dailyNum();
       const rec = store.get(K.daily, {})[n];
-      showQuestion(dailyFor(n), { kind: 'daily', n, answered: rec ? rec.a : null });
+      showQuestion(dailyFor(n), { kind: 'daily', n, answered: rec ? rec.a : null, secs: rec ? rec.s : null });
     } else {
       let cur = store.get(K.cur, null);
       if (!cur || !QBY[cur.id] || upcomingDailies().has(cur.id) && !cur.a) { cur = { id: pickPractice() }; store.set(K.cur, cur); }
-      showQuestion(cur.id, { kind: 'practice', answered: cur.a || null });
+      showQuestion(cur.id, { kind: 'practice', answered: cur.a || null, secs: cur.s });
     }
   }
 
@@ -130,8 +165,8 @@
     }
     qc.append(opts);
     w.append(qc);
-    if (ctx.answered) reveal(q, ctx, ctx.answered, false);
-    else if (hasStim) window.scrollTo({ top: 0 });
+    if (ctx.answered) { frozenTimer(ctx.secs); reveal(q, ctx, ctx.answered, false, ctx.secs); }
+    else { startTimer(q.id); if (hasStim) window.scrollTo({ top: 0 }); }
     // prefetch figures for the next practice question
   }
 
@@ -149,19 +184,21 @@
 
   function answer(q, ctx, L) {
     const correct = L === q.answer;
+    if (ctx.kind === 'daily' && store.get(K.daily, {})[ctx.n]) return;
+    const secs = stopTimer();
     if (ctx.kind === 'daily') {
-      const d = store.get(K.daily, {}); if (d[ctx.n]) return;
-      d[ctx.n] = { id: q.id, a: L, c: correct ? 1 : 0 }; store.set(K.daily, d);
+      const d = store.get(K.daily, {});
+      d[ctx.n] = { id: q.id, a: L, c: correct ? 1 : 0, s: secs }; store.set(K.daily, d);
     } else {
-      store.set(K.cur, { id: q.id, a: L });
+      store.set(K.cur, { id: q.id, a: L, s: secs });
     }
-    markSeen(q.id, correct);
+    markSeen(q.id, correct, secs);
     if (navigator.vibrate) try { navigator.vibrate(correct ? 30 : [40, 60, 40]); } catch {}
-    reveal(q, ctx, L, true);
+    reveal(q, ctx, L, true, secs);
     updateStreak();
   }
 
-  function reveal(q, ctx, L, fresh) {
+  function reveal(q, ctx, L, fresh, secs) {
     const correct = L === q.answer;
     document.querySelectorAll('.opt').forEach(b => {
       b.disabled = true;
@@ -171,6 +208,11 @@
     const qc = $('#qcard');
     const ex = el('div', 'card explain' + (fresh ? ' reveal' : ''));
     ex.append(el('div', 'verdict ' + (correct ? 'ok' : 'bad'), correct ? 'Correct!' : `Not quite — the answer is ${q.answer}`));
+    if (secs != null) {
+      const over = secs > TIME_LIMIT;
+      ex.append(el('div', 'time-note' + (over ? ' over' : ''),
+        `⏱ ${fmt(secs)}` + (over ? ` — ${fmt(secs - TIME_LIMIT)} over the 1:40 budget` : ` — within the 1:40 budget`)));
+    }
     if (q.explain) ex.append(el('div', '', md(q.explain)));
     qc.after(ex);
 
@@ -178,7 +220,7 @@
     if (ctx.kind === 'daily') {
       act.append(el('p', 'done-note', `That’s today’s ASTdle done. Next one at midnight.`));
       const row = el('div', 'actions');
-      row.append(btn('Share', 'secondary', () => share(ctx.n, correct)));
+      row.append(btn('Share', 'secondary', () => share(ctx.n, correct, secs)));
       row.append(btn('Keep practising →', 'primary', () => { mode = 'practice'; render(); window.scrollTo({ top: 0 }); }));
       act.append(row);
     } else {
@@ -204,9 +246,10 @@
     const s = streaks(); const e = $('#streak');
     e.hidden = !s.cur; e.textContent = `🔥 ${s.cur}`; e.title = `${s.cur}-day streak`;
   }
-  function share(n, correct) {
+  function share(n, correct, secs) {
     const s = streaks();
-    const text = `ASTdle #${n} ${correct ? '✅' : '❌'}\n🔥 ${s.cur} day streak` + (s.cc > 1 ? ` · ${s.cc} right in a row` : '');
+    const t = secs == null ? '' : ` ⏱ ${fmt(secs)}${secs > TIME_LIMIT ? ' 🐢' : ''}`;
+    const text = `ASTdle #${n} ${correct ? '✅' : '❌'}${t}\n🔥 ${s.cur} day streak` + (s.cc > 1 ? ` · ${s.cc} right in a row` : '');
     if (navigator.share) navigator.share({ text }).catch(() => {});
     else if (navigator.clipboard) navigator.clipboard.writeText(text).then(() => toast('Copied to clipboard'));
   }
@@ -214,6 +257,8 @@
     const s = streaks(); const seen = store.get(K.seen, {});
     const vals = Object.values(seen); const right = vals.filter(v => v.c).length;
     const pct = vals.length ? Math.round(100 * right / vals.length) : 0;
+    const timed = vals.filter(v => typeof v.s === 'number');
+    const avg = timed.length ? Math.round(timed.reduce((a, v) => a + v.s, 0) / timed.length) : null;
     $('#statsBody').innerHTML = `
       <div class="statgrid">
         <div><b>${s.played}</b><span>Dailies played</span></div>
@@ -221,7 +266,7 @@
         <div><b>${s.best}</b><span>Best streak</span></div>
         <div><b>${vals.length}</b><span>Questions answered</span></div>
         <div><b>${pct}%</b><span>Correct</span></div>
-        <div><b>${DATA.questions.length - vals.length}</b><span>Still to see</span></div>
+        <div><b>${avg == null ? '–' : fmt(avg)}</b><span>Avg time (target 1:40)</span></div>
       </div>`;
     $('#stats').showModal();
   }
